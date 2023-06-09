@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as path;
+import 'package:intl/intl.dart';
 
 void main() {
   runApp(MyApp());
@@ -28,8 +29,8 @@ class DatabaseHelper {
       dbFilePath,
       version: 1,
       onCreate: (db, version) async {
-        await db.execute('CREATE TABLE products(id INTEGER PRIMARY KEY, title TEXT, description TEXT)');
-        await db.execute('CREATE TABLE cart(id INTEGER PRIMARY KEY, title TEXT, description TEXT)');
+        await db.execute('CREATE TABLE products(id INTEGER PRIMARY KEY, title TEXT, description TEXT,quantity INTEGER)');
+        await db.execute('CREATE TABLE cart(id INTEGER PRIMARY KEY, title TEXT, description TEXT,quantity INTEGER)');
       },
     );
   }
@@ -53,9 +54,18 @@ class DatabaseHelper {
 
   static Future<void> insertCartItem(Product product) async {
     final db = await database();
-    await db.insert(
-      'cart',
-      product.toMap(),
+
+    var value = {
+
+      'id': product.id,
+      'title': product.title,
+      'description': product.description,      
+     'quantity': product.quantity+=1,
+   };   
+   await db.insert(
+       'cart',
+      value,
+      //product.toMap(),
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
@@ -77,6 +87,15 @@ class DatabaseHelper {
     );
   }
 
+  static Future<void> updateCart(Product product) async {
+    final db = await database();
+    await db.update(
+      'cart',
+      product.toMap(),
+      where: 'id = ?',
+      whereArgs: [product.id],
+    );
+  }
   static Future<void> updateProduct(Product product) async {
     final db = await database();
     await db.update(
@@ -101,11 +120,13 @@ class Product {
   final int id;
   final String title;
   final String description;
+  int quantity;
 
   Product({
     required this.id,
     required this.title,
     required this.description,
+    required this.quantity,
   });
 
   Map<String, dynamic> toMap() {
@@ -113,17 +134,20 @@ class Product {
       'id': id,
       'title': title,
       'description': description,
+      'quantity': quantity,
     };
   }
 
   static Product fromMap(Map<String, dynamic> map) {
     return Product(
       id: map['id'],
-      title: map['title'],
-      description: map['description'],
+      title: map['title']??'',
+      description: map['description']??'',
+      quantity: map['quantity'],
     );
   }
 }
+
 
 class HomePage extends StatelessWidget {
   @override
@@ -135,15 +159,15 @@ class HomePage extends StatelessWidget {
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: [
+          children: const [
             // Image.network(
             //   'https://example.com/shop_logo.png',
             //   width: 200,
             //   height: 200,
             //   fit: BoxFit.contain,
             // ),
-            const SizedBox(height: 20),
-            const Text(
+            SizedBox(height: 20),
+            Text(
               'Добро пожаловать в наш магазин!',
               style: TextStyle(fontSize: 20),
             ),
@@ -162,7 +186,7 @@ class AppDrawer extends StatelessWidget {
       child: ListView(
         children: [
           ListTile(
-            title: const Text('Список товаров'),
+            title: const Text('Главная'),
             onTap: () {
               Navigator.pop(context);
               Navigator.push(
@@ -171,16 +195,7 @@ class AppDrawer extends StatelessWidget {
               );
             },
           ),
-          ListTile(
-            title: const Text('Товары'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => ProductPage()),
-              );
-            },
-          ),
+
           ListTile(
             title: const Text('Корзина'),
             onTap: () {
@@ -192,6 +207,15 @@ class AppDrawer extends StatelessWidget {
             },
           ),
           ListTile(
+            title: const Text('Справочник Товары'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => ProductPage()),
+              );
+            },
+          ),          ListTile(
             title: const Text('Оплата'),
             onTap: () {
               Navigator.pop(context);
@@ -232,7 +256,7 @@ class ProductListPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Список товаров'),
+        title: const Text('Выбор товаров'),
       ),
       body: FutureBuilder<List<Product>>(
         future: DatabaseHelper.getProducts(),
@@ -252,16 +276,25 @@ class ProductListPage extends StatelessWidget {
               itemBuilder: (context, index) {
                 return ListTile(
                   title: Text(products[index].title),
-                  subtitle: Text(products[index].description),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(products[index].description),
+                      Text('Quantity: ${products[index].quantity}'),
+                    ],
+                  ),
                   trailing: IconButton(
                     icon: const Icon(Icons.add),
                     onPressed: () {
-                      DatabaseHelper.insertCartItem(products[index]);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Товар добавлен в корзину'),
-                        ),
-                      );
+                      Product updatedProduct = products[index];
+                      //updatedProduct.quantity += 1;
+                      DatabaseHelper.insertCartItem(updatedProduct).then((_) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Товар добавлен в корзину'),
+                          ),
+                        );
+                      });
                     },
                   ),
                 );
@@ -309,6 +342,15 @@ class _ProductPageState extends State<ProductPage> {
     );
     _loadProducts();
   }
+  void _navigateToAddProductPage() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AddProductPage(),
+      ),
+    );
+    _loadProducts();
+  }
 
   void _deleteProduct(Product product) {
     DatabaseHelper.removeProduct(product.id).then((_) {
@@ -329,7 +371,7 @@ class _ProductPageState extends State<ProductPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Список товаров'),
+        title: const Text('Справочник ТОВАРОВ'),
       ),
       body: ProductList(
         products: products,
@@ -337,8 +379,8 @@ class _ProductPageState extends State<ProductPage> {
         onDeleteProduct: _deleteProduct,
       ),
       floatingActionButton: FloatingActionButton(
-  child: Icon(Icons.add),
-  onPressed: () => _navigateToEditProductPage(Product(id: 0, title: '', description: '')),
+  child: const Icon(Icons.add),
+  onPressed: () => _navigateToAddProductPage(), 
 ),
     );
   }
@@ -363,17 +405,86 @@ class ProductList extends StatelessWidget {
       itemBuilder: (context, index) {
         final product = products[index];
         return ListTile(
-          title: Text(product.title),
-          subtitle: Text(product.description),
+          //title: Text(product.title),
+          title: Column(
+                      children: [
+                        const Divider(),
+                        Row(children: [
+                          Expanded(
+                              flex: 2,
+                              child: Column(
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Text(':'),
+                                      const SizedBox(width: 5),
+                                      Text(product.title),
+                                    ],
+                                  )
+                                ],
+                              )
+                              ),
+                      ]
+                      ),
+                          Row(children: [Expanded(
+                              flex: 2,
+                              child: Column(
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Text(':'),
+                                      const SizedBox(width: 5),
+                                      Text((product.description)),
+                                    ],
+                                  )
+                                ],
+                              )),
+                        ]
+                        ),
+                      ],
+                    ),
+          subtitle: Column(
+                      children: [
+                        const Divider(),
+                        Row(children: [
+                          Expanded(
+                              flex: 2,
+                              child: Column(
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Text('Кількість:'),
+                                      const SizedBox(width: 5),
+                                      Text(product.quantity .toString()),
+                                    ],
+                                  )
+                                ],
+                              )),
+                          Expanded(
+                              flex: 2,
+                              child: Column(
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Text('Ціна:'),
+                                      const SizedBox(width: 5),
+                                      Text((product.quantity .toString())),
+                                    ],
+                                  )
+                                ],
+                              )),
+                        ]),
+                      ],
+                    ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                icon: Icon(Icons.edit),
+                icon: const Icon(Icons.edit),
                 onPressed: () => onEditProduct(product),
               ),
               IconButton(
-                icon: Icon(Icons.delete),
+                icon: const Icon(Icons.delete),
                 onPressed: () => onDeleteProduct(product),
               ),
             ],
@@ -382,6 +493,11 @@ class ProductList extends StatelessWidget {
       },
     );
   }
+}
+
+doubleThreeToString(double sum) {
+  var f = NumberFormat("##0", "en_US");
+  return (f.format(sum).toString());
 }
 
 class AddProductPage extends StatefulWidget {
@@ -393,18 +509,21 @@ class _AddProductPageState extends State<AddProductPage> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _titleController;
   late TextEditingController _descriptionController;
+  late TextEditingController _quantityController;
 
   @override
   void initState() {
     super.initState();
     _titleController = TextEditingController();
     _descriptionController = TextEditingController();
+    _quantityController = TextEditingController();
   }
 
   @override
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
+    _quantityController.dispose();    
     super.dispose();
   }
 
@@ -440,6 +559,16 @@ class _AddProductPageState extends State<AddProductPage> {
                   return null;
                 },
               ),
+              TextFormField(
+              controller: _quantityController,
+              decoration: const InputDecoration(labelText: 'quantity**'),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Введите Количество товара';
+                }
+                return null;
+              },
+              ),
               const SizedBox(height: 16),
               ElevatedButton(
                 child: const Text('Добавить'),
@@ -449,6 +578,7 @@ class _AddProductPageState extends State<AddProductPage> {
                       id: DateTime.now().millisecondsSinceEpoch,
                       title: _titleController.text,
                       description: _descriptionController.text,
+                      quantity: int.tryParse(_quantityController.text )  ?? 0,
                     );
                     DatabaseHelper.insertProduct(product).then((_) {
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -481,12 +611,14 @@ class EditProductPage extends StatefulWidget {
 class _EditProductPageState extends State<EditProductPage> {
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
+ final TextEditingController _quantityController = TextEditingController() ;
 
   @override
   void initState() {
     super.initState();
     _titleController.text = widget.product.title;
-    _descriptionController.text = widget.product.description;
+    _descriptionController.text = widget.product.description; 
+    _quantityController.text = widget.product.quantity.toString();
   }
 
   @override
@@ -500,11 +632,14 @@ class _EditProductPageState extends State<EditProductPage> {
   final String title = _titleController.text.trim();
   final String description = _descriptionController.text.trim();
 
+  final String quantity = _quantityController.text.trim();
+
   if (title.isNotEmpty && description.isNotEmpty) {
     final Product updatedProduct = Product(
       id: widget.product.id,
       title: title,
       description: description,
+      quantity: int.tryParse(quantity )  ?? 0,
     );
 
     DatabaseHelper.updateProduct(updatedProduct).then((_) {
@@ -548,14 +683,20 @@ class _EditProductPageState extends State<EditProductPage> {
           children: [
             TextField(
               controller: _titleController,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'Название',
               ),
             ),
             TextField(
               controller: _descriptionController,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'Описание',
+              ),
+            ),
+                        TextField(
+              controller: _quantityController,
+              decoration: const InputDecoration(
+                labelText: 'Количество',
               ),
             ),
             SizedBox(height: 16.0),
@@ -563,12 +704,12 @@ class _EditProductPageState extends State<EditProductPage> {
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 ElevatedButton(
-                  child: Text('Сохранить'),
+                  child: const Text('Сохранить'),
                   onPressed: _saveProduct,
                 ),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(primary: Colors.red),
-                  child: Text('Удалить'),
+                  child: const Text('Удалить'),
                   onPressed: _deleteProduct,
                 ),
               ],
@@ -596,17 +737,8 @@ class _CartPageState extends State<CartPage> {
   }
 
   void refreshPage() {
-    setState(() {});
-  }
-
-  void refreshCart() {
     setState(() {
-      // Обновление данных корзины
-      DatabaseHelper.getCartItems().then((cartItems) {
-    setState(() {
-      cartItemsFuture = Future.value(cartItems);
-    });
-  });
+      cartItemsFuture = DatabaseHelper.getCartItems();
     });
   }
 
@@ -625,7 +757,7 @@ class _CartPageState extends State<CartPage> {
             );
           } else if (snapshot.hasError) {
             return const Center(
-              child: Text('Ошибка при загрузке товаров'),
+              child: Text('Ошибка при загрузке товаров из корзины'),
             );
           } else if (snapshot.hasData) {
             final List<Product> cartItems = snapshot.data!;
@@ -634,18 +766,38 @@ class _CartPageState extends State<CartPage> {
               itemBuilder: (context, index) {
                 return ListTile(
                   title: Text(cartItems[index].title),
-                  subtitle: Text(cartItems[index].description),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(cartItems[index].description),
+                      Text('Кво: ${cartItems[index].quantity}'),
+                    ],
+                  ),
                   trailing: IconButton(
-                    icon: const Icon(Icons.delete),
+                    icon: const Icon(Icons.remove_shopping_cart),
                     onPressed: () {
-                      DatabaseHelper.removeCartItem(cartItems[index].id).then((_) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Товар удален из корзины'),
-                          ),
+                      Product updatedProduct = cartItems[index];
+                      updatedProduct.quantity -= 1;
+                      if (updatedProduct.quantity <= 0) {
+                        DatabaseHelper.removeCartItem(updatedProduct.id ).then((_) {
+                          refreshPage();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Товар удален из корзины'),
+                            ),
+                          );
+                        });
+                      } else {
+                        DatabaseHelper.updateCart(updatedProduct).then((_) {
+                          refreshPage();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Количество товара в корзине обновлено'),
+                            ),
+                          );
+                        }
                         );
-                        refreshCart(); // Обновление корзины после удаления товара
-                      });
+                      }
                     },
                   ),
                 );
@@ -661,6 +813,7 @@ class _CartPageState extends State<CartPage> {
     );
   }
 }
+
 
 class PaymentPage extends StatelessWidget {
   @override
